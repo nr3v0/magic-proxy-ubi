@@ -1,0 +1,4 @@
+.*_history
+
+# Reference pfSense HAProxy export — contains user password hashes; keep local.
+haproxy.cfg.pfsense
