@@ -3,8 +3,8 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal
 
 LABEL name="haproxy" \
       vendor="Custom" \
-      summary="OpenShift-friendly HAProxy on UBI 10" \
-      description="HAProxy installed from UBI 10 repositories with arbitrary UID support and fixed config path /etc/haproxy/haproxy.cfg"
+      summary="HAProxy on UBI 10" \
+      description="HAProxy installed from UBI 10 repositories with non-root support and fixed config path /etc/haproxy/haproxy.cfg"
 
 ENV HAPROXY_CFG_DIR=/etc/haproxy \
     HAPROXY_CFG_FILE=/etc/haproxy/haproxy.cfg \

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: POSIX syntax check (sh -n)
+        run: |
+          set -eu
+          fail=0
+          for f in ubi10/scripts/*.sh; do
+            echo "checking $f"
+            sh -n "$f" || fail=1
+          done
+          exit $fail
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          # POSIX sh scripts; the agent relies on `local` (widely supported) so
+          # we don't fail the build on style-only findings.
+          severity: error
+          scandir: ./ubi10/scripts
+
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build container image
+        run: |
+          docker build -f ubi10/Containerfile -t magic-proxy-ubi:ci ubi10
+
+      - name: Validate HAProxy config inside the image
+        run: |
+          docker run --rm --entrypoint sh magic-proxy-ubi:ci -c \
+            'haproxy -c -f /etc/haproxy/haproxy.cfg -f /etc/haproxy/conf.d/'
+
+      - name: Smoke test (boot without ACME, check stats endpoint)
+        run: |
+          set -eu
+          docker run -d --name haproxy-ci -p 8404:8404 magic-proxy-ubi:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8404/stats >/dev/null 2>&1; then
+              echo "stats endpoint is up"; ok=1; break
+            fi
+            sleep 1
+          done
+          docker logs haproxy-ci || true
+          docker rm -f haproxy-ci
+          [ "${ok:-0}" = "1" ] || { echo "container did not become healthy"; exit 1; }

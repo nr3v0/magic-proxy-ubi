@@ -1,0 +1,35 @@
+magic-proxy-ubi
+Copyright (c) 2026 Nate Revo
+
+This product's repository source (Containerfile, scripts, configuration,
+examples, and documentation) is licensed under the MIT License; see the LICENSE
+file. The MIT license applies ONLY to the files in this repository.
+
+Container images built from this repository bundle third-party software, each
+under its own license. These components are combined by aggregation and retain
+their original licenses:
+
+  - Red Hat Universal Base Image 10 (ubi, ubi-minimal)
+    License: Red Hat Universal Base Image End User License Agreement (UBI EULA)
+    https://www.redhat.com/licenses/EULA_Red_Hat_Universal_Base_Image_English_20190422.pdf
+
+  - HAProxy (haproxy-awslc)
+    License: GPL-2.0-or-later (portions LGPL-2.1)
+    https://github.com/haproxy/haproxy
+
+  - HAProxy Data Plane API
+    License: Apache-2.0
+    https://github.com/haproxytech/dataplaneapi
+
+  - acme.sh
+    License: GPL-3.0
+    https://github.com/acmesh-official/acme.sh
+
+Additional packages installed from the Red Hat UBI repositories carry their own
+upstream licenses (predominantly GPL, LGPL, MIT, and BSD variants). For the
+authoritative, per-package list for a built image, run:
+
+    rpm -qa --qf '%{NAME} %{VERSION} %{LICENSE}\n' | sort
+
+Redistribution of the built image is additionally subject to the Red Hat UBI
+EULA. This NOTICE is informational and is not legal advice.

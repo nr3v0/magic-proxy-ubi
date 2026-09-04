@@ -1,0 +1,45 @@
+# Quadlet unit (preferred over the deprecated `podman generate systemd`).
+#
+# Install (rootful):
+#   sudo cp examples/haproxy-acme.container /etc/containers/systemd/
+#   sudo mkdir -p /etc/haproxy-acme
+#   sudo cp examples/acme.env.example     /etc/haproxy-acme/acme.env   # then edit secrets
+#   sudo cp examples/domains.txt.example  /etc/haproxy-acme/domains.txt
+#   sudo chmod 600 /etc/haproxy-acme/acme.env
+#   sudo systemctl daemon-reload
+#   sudo systemctl start haproxy-acme.service
+#
+# Quadlet generates a systemd service named after the file: haproxy-acme.service.
+
+[Unit]
+Description=HAProxy 3.3 (UBI10) + Data Plane API + ACME DNS-01 agent
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=ghcr.io/yourorg/magic-proxy-ubi:latest
+ContainerName=haproxy-acme
+EnvironmentFile=/etc/haproxy-acme/acme.env
+Volume=/etc/haproxy-acme/domains.txt:/etc/haproxy/acme/domains.txt:ro,Z
+# Always persist these two -- ACME account/renewal state and the actual PEM
+# files HAProxy serves. See "Volume & Persistence Guidance" in README.md.
+Volume=haproxy-acme.volume:/etc/haproxy/acme:Z
+Volume=haproxy-certs.volume:/etc/haproxy/certs:Z
+# Optional: only needed if you manage maps/backups/SPOE via the Data Plane
+# API and want that state to survive a restart too.
+Volume=haproxy-maps.volume:/etc/haproxy/maps:Z
+Volume=haproxy-backups.volume:/etc/haproxy/backups:Z
+Volume=haproxy-spoe.volume:/etc/haproxy/spoe:Z
+Volume=haproxy-dataplane-storage.volume:/etc/haproxy/dataplane-storage:Z
+PublishPort=8080:8080
+PublishPort=8443:8443
+PublishPort=8404:8404
+PublishPort=5555:5555
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target default.target

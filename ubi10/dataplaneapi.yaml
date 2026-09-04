@@ -1,5 +1,5 @@
 config_version: 2
-name: haproxy-ubi10-single-container
+name: magic-proxy-ubi-single-container
 
 dataplaneapi:
   host: "0.0.0.0"

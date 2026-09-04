@@ -34,7 +34,7 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal
 
 LABEL name="haproxy" \
       vendor="Custom" \
-      summary="OpenShift-friendly HAProxy 3.3 AWS-LC on UBI 10" \
+      summary="HAProxy 3.3 AWS-LC on UBI 10" \
       description="HAProxy AWS-LC package from HAProxyTech repo with Data Plane API on UBI 10"
 
 ENV HAPROXY_CFG_DIR=/etc/haproxy \

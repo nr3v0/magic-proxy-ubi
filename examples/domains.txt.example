@@ -1,0 +1,5 @@
+# One domain per line. Blank lines and lines starting with # are ignored.
+# Wildcards are supported (DNS-01 makes them possible).
+example.com
+*.example.com
+# api.example.com

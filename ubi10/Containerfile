@@ -1,6 +1,6 @@
 FROM registry.access.redhat.com/ubi10/ubi AS builder
 
-LABEL name="haproxy-builder" \
+LABEL name="magic-proxy-ubi-builder" \
       vendor="Custom" \
       summary="Builder stage for HAProxy 3.3 AWS-LC and Data Plane API on UBI 10"
 
@@ -34,9 +34,9 @@ RUN set -eux; \
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal
 
-LABEL name="haproxy" \
+LABEL name="magic-proxy-ubi" \
       vendor="Custom" \
-      summary="OpenShift-friendly HAProxy 3.3 AWS-LC on UBI 10" \
+      summary="HAProxy 3.3 AWS-LC on UBI 10" \
       description="HAProxy AWS-LC package from HAProxyTech repo with Data Plane API on UBI 10"
 
 ENV HAPROXY_CFG_DIR=/etc/haproxy \
@@ -59,6 +59,7 @@ ENV HAPROXY_CFG_DIR=/etc/haproxy \
     ACME_ENABLED=false \
     ACME_CA=letsencrypt \
     ACME_DOMAINS="" \
+    ACME_DOMAINS_FILE=/etc/haproxy/acme/acme_domains.txt \
     ACME_EMAIL="" \
     ACME_RENEW_INTERVAL=43200 \
     DATAPLANE_URL=http://127.0.0.1:5555 \
@@ -132,10 +133,48 @@ RUN set -eux; \
     chmod 0644 /etc/haproxy/haproxy.cfg; \
     chmod 0640 /etc/haproxy/dataplaneapi.yaml; \
     find /etc/haproxy/conf.d /etc/haproxy/acme -type f -exec chmod 0644 {} \;
-EXPOSE 8080 8443 8444 8404 5555
+
+# Create an unprivileged default user (uid 1001, primary gid 0). Every writable
+# dir is group-0 / g=u with the setgid bit, so the container runs as its default
+# non-root user and also works under any other UID you assign at runtime
+# (e.g. `podman run --user`).
+RUN set -eux; \
+    echo "haproxy:x:1001:0:HAProxy:/tmp:/sbin/nologin" >> /etc/passwd
+
+EXPOSE 8080 8443 8444 6443 22623 8404 5555
+
+# /etc/haproxy/conf.d/ is a volume mount point. The demo frontend/backend
+# config baked in above (from ubi10/conf.d/) populates it by default -- Docker
+# and Podman both copy an image directory's existing content into a fresh
+# anonymous volume -- but mounting a host directory here masks it entirely,
+# e.g. `-v $(pwd)/prod/conf.d:/etc/haproxy/conf.d:Z` for a real deployment
+# (see prod/conf.d/ and CLAUDE.md).
+#
+# The rest are also volume mount points: state the ACME agent and Data Plane
+# API write at runtime, which must survive container restarts -- without a
+# mount, a fresh anonymous volume is created on every `podman run` (still
+# pre-populated from image content, e.g. the bootstrap cert in certs/), so
+# certs get re-issued (hitting Let's Encrypt rate limits) and any maps/backups
+# edits made via the API vanish. Each corresponds to a HAPROXY_*_DIR ENV
+# above and a dataplaneapi.yaml resources:/transaction: key:
+#   /etc/haproxy/certs             ssl_certs_dir      -- ACME agent deploys real certs here
+#   /etc/haproxy/acme               LE_CONFIG_HOME     -- acme.sh account/state/certs
+#   /etc/haproxy/spoe                spoe_dir           -- SPOE agent config, if used
+#   /etc/haproxy/dataplane-storage  dataplane_storage_dir -- misc Data Plane API storage
+#   /etc/haproxy/maps                maps_dir           -- live-editable HAProxy map files
+#   /etc/haproxy/backups             backups_dir        -- Data Plane API's config edit history
+VOLUME ["/etc/haproxy/conf.d", "/etc/haproxy/certs", "/etc/haproxy/acme", "/etc/haproxy/spoe", "/etc/haproxy/dataplane-storage", "/etc/haproxy/maps", "/etc/haproxy/backups"]
 
 #STOPSIGNAL SIGUSR1
 STOPSIGNAL SIGTERM
+
+# Liveness probe: the unauthenticated HAProxy stats endpoint on :8404 answers
+# 200 once HAProxy is serving. If you remove the fe_stats frontend from conf.d/,
+# point this at another endpoint (e.g. an http frontend).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8404/stats >/dev/null 2>&1 || exit 1
+
+USER 1001
 
 ENTRYPOINT ["/usr/local/bin/container-entrypoint-dataplane.sh"]
 CMD ["-f", "/etc/haproxy/haproxy.cfg", "-f", "/etc/haproxy/conf.d/"]

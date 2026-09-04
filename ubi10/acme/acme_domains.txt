@@ -1,0 +1,13 @@
+# Domains for which the ACME agent requests/renews certificates.
+# One per line; blank lines and lines starting with # are ignored.
+# Wildcards are supported (DNS-01 makes them possible).
+#
+# This is the image's baked-in default (ACME_DOMAINS_FILE points here) --
+# it ships with everything commented out, so ACME_ENABLED=true is a safe
+# no-op ("No domains configured. Idling.") until you either edit this in,
+# mount your own file over it, point ACME_DOMAINS_FILE elsewhere, or just
+# set ACME_DOMAINS instead (it's used as a fallback whenever this file is
+# empty/all-comments).
+#
+# example.com
+# *.example.com
