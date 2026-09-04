@@ -2,3 +2,22 @@
 
 # Reference pfSense HAProxy export — contains user password hashes; keep local.
 haproxy.cfg.pfsense
+
+# Real per-cluster/app frontend+backend fragments ported from the live pfSense
+# config — reveal internal domains/IPs, keep local. Never baked into the image;
+# mount prod/conf.d/ over /etc/haproxy/conf.d/ at runtime instead (see CLAUDE.md).
+prod/
+
+# Local secrets / real ACME env files (keep only *.example in version control)
+*.env
+!*.env.example
+
+# Scratch / test artefacts
+ubi10/test-dummy-domains.txt
+ubi10/test-acme-data/
+ubi10/TESTFILE.txt
+
+# Editor / session leftovers
+*.bak
+claude-resume.txt
+.claude/
