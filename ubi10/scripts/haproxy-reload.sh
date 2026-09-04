@@ -2,9 +2,9 @@
 # /usr/local/bin/haproxy-reload.sh
 set -eu
 
-CFG="/etc/haproxy/haproxy.cfg"
-CONF_DIR="/etc/haproxy/conf.d"
-PIDFILE="/var/lib/haproxy/haproxy.pid"
+CFG="${HAPROXY_CFG_FILE:-/etc/haproxy/haproxy.cfg}"
+CONF_DIR="${HAPROXY_CONF_D_DIR:-/etc/haproxy/conf.d}"
+PIDFILE="${HAPROXY_PIDFILE:-/var/lib/haproxy/haproxy.pid}"
 
 if [ -d "$CONF_DIR" ]; then
     haproxy -c -f "$CFG" -f "$CONF_DIR"

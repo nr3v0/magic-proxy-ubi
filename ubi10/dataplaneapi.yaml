@@ -18,6 +18,9 @@ dataplaneapi:
   userlist:
     userlist: "dataplaneapi"
 
+  # This is a static file (no env var substitution), so these paths are
+  # literals that must be kept in sync by hand with the matching
+  # HAPROXY_*_DIR values and mkdir/chgrp/chmod lists in ubi10/Containerfile.
   transaction:
     transaction_dir: "/tmp/haproxy-transactions"
     backups_number: 5

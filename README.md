@@ -105,7 +105,6 @@ Values marked **required** must be present for the respective feature to work; o
 | Variable | Required? | Default | Description |
 |----------|-----------|---------|-------------|
 | `ACME_ENABLED` | **No** (but needed for ACME) | `false` | Set to `true` to launch the ACME agent alongside HAProxy and the Data Plane API. |
-| `ACME_DEBUG` | **No** | `false` | If set to `true`, the agent will output additional debug logs (useful for troubleshooting). |
 
 ### ACME / Let’s Encrypt Settings
 
@@ -118,11 +117,14 @@ Values marked **required** must be present for the respective feature to work; o
 | `ACME_EMAIL` | **Recommended** | – | Email address for ACME account registration (used with `--register-account`). |
 | `ACME_CA` | **No** | `letsencrypt` | ACME CA endpoint URL. Use `letsencrypt_test` for the Let’s Encrypt staging environment to avoid hitting rate limits while testing. |
 | `ACME_RENEW_INTERVAL` | **No** | `43200` (12 h) | How often (in seconds) the agent checks for certificate renewals and, if a domain file is used, polls for file‑modification changes. |
+| `ACME_EXTRA_ARGS` | **No** | – | Extra flags passed verbatim to `acme.sh --issue` (e.g. additional validation or DNS options). |
 | `DATAPLANE_URL` | **No** | `http://127.0.0.1:5555` | Base URL of the Data Plane API (used by the deploy hook). |
 | `DATAPLANE_USER` | **No** | `admin` | Username for HTTP basic auth against the Data Plane API. |
 | `DATAPLANE_PASS` | **No** | `change-me` | Password for HTTP basic auth against the Data Plane API. |
 
 > **Important**: The ACME agent stores the account key, certificates, and renewal state under `/etc/haproxy/acme` (the value of `LE_CONFIG_HOME`). This directory **must** be backed by a persistent volume or bind‑mount; otherwise each container start will generate a new account and request fresh certificates, quickly exhausting Let’s Encrypt’s rate limits.
+
+> **Note**: Setting `ACME_ENABLED=true` makes `acme-agent.sh` register an ACME account on your behalf (`acme.sh --register-account`) — that's *you*, the operator, agreeing to [Let's Encrypt's Subscriber Agreement](https://letsencrypt.org/repository/), not this project. It's worth a read; recent revisions added an explicit warranty that you're not located in a jurisdiction under comprehensive U.S. sanctions. Using `dns_porkbun` similarly puts you under Porkbun's API Terms of Service.
 
 > **Note**: `ACME_DOMAINS`/`ACME_DOMAINS_FILE` is a plain, manually‑maintained list — the agent never reads `haproxy.cfg`/`conf.d/`, so adding a route to your config doesn't automatically request it a cert, and removing one doesn't stop renewing it. If you're maintaining a real (non‑demo) `conf.d/`, `tools/check-acme-domains.py` cross‑checks your domains file against a TLS‑terminating frontend's ACLs and flags drift in either direction (`make check-acme-domains ACME_DOMAINS_FILE=path/to/domains.txt`).
 
@@ -132,10 +134,10 @@ The Data Plane API is configured via `/etc/haproxy/dataplaneapi.yaml` (mounted i
 
 | Key | Description |
 |-----|-------------|
-| `listen.address` / `listen.port` | Where the API binds (default `0.0.0.0:5555`). |
-| `auth.method` | Currently `basic` (uses the `userlist` defined in `haproxy.cfg`). |
-| `storage.ssl_certs_dir` | Directory where the deploy hook writes PEM files (must match the `ssl crt` directive in the frontend). |
-| `reload_cmd` / `restart_cmd` | Commands executed after a successful certificate push (set to `/usr/local/bin/haproxy-reload.sh` for a hitless reload). |
+| `dataplaneapi.host` / `dataplaneapi.port` | Where the API binds (default `0.0.0.0:5555`). |
+| `dataplaneapi.userlist.userlist` | Name of the `userlist` (defined in `haproxy.cfg`) used for basic auth — currently `dataplaneapi`. |
+| `dataplaneapi.resources.ssl_certs_dir` | Directory where the deploy hook writes PEM files (must match the `ssl crt` directive in the frontend). |
+| `haproxy.reload.reload_cmd` / `haproxy.reload.restart_cmd` | Commands executed after a successful certificate push (set to `/usr/local/bin/haproxy-reload.sh` for a hitless reload). |
 
 ---  
 
@@ -352,6 +354,8 @@ podman build -f ubi10/Containerfile \
 
 To pin HAProxy or the Data Plane API to an exact patch, edit the repo channel / `DATAPLANE_VERSION` in `ubi10/Containerfile`. Pinning the base images to a digest (`ubi10/ubi-minimal@sha256:…`) is recommended for production supply-chain guarantees.
 
+Beyond reproducibility, pinning `ACME_SH_REF` away from the floating `master` default also gives you a defensible, exact record of which acme.sh (GPL‑3.0) source a given image was built from — see [`NOTICE`](NOTICE).
+
 ---  
 
 <a name="continuous-integration"></a>
@@ -416,6 +420,7 @@ their respective licenses:
 |-----------|---------|--------|
 | Red Hat Universal Base Image 10 (`ubi`, `ubi-minimal`) | Red Hat Universal Base Image End User License Agreement (UBI EULA) | <https://www.redhat.com/licenses/EULA_Red_Hat_Universal_Base_Image_English_20190422.pdf> |
 | HAProxy (`haproxy-awslc`) | GPL‑2.0‑or‑later (portions LGPL‑2.1) | <https://github.com/haproxy/haproxy> |
+| AWS‑LC (HAProxy's TLS/crypto backend — confirmed via `haproxy -vv`) | Apache‑2.0 OR ISC | <https://github.com/aws/aws-lc> |
 | HAProxy Data Plane API | Apache‑2.0 | <https://github.com/haproxytech/dataplaneapi> |
 | acme.sh | GPL‑3.0 | <https://github.com/acmesh-official/acme.sh> |
 
@@ -423,7 +428,9 @@ Redistribution of the **built image** is additionally subject to the Red Hat UBI
 EULA. Individual packages installed from the UBI repositories carry their own
 upstream licenses (mostly GPL/LGPL/MIT/BSD); run `rpm -qa --qf '%{NAME} %{LICENSE}\n'`
 inside the image for the full per‑package list. See the [`NOTICE`](NOTICE) file
-for a concise summary.
+for a concise summary, including why HAProxy (GPL‑2.0‑*or‑later*) linking
+against AWS‑LC (Apache‑2.0) doesn't need HAProxy's OpenSSL‑specific GPL
+exception clause.
 
 > **Note:** This is informational, not legal advice. For commercial
 > redistribution, review the Red Hat UBI EULA and the component licenses directly.

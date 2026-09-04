@@ -4,9 +4,7 @@ LABEL name="magic-proxy-ubi-builder" \
       vendor="Custom" \
       summary="Builder stage for HAProxy 3.3 AWS-LC and Data Plane API on UBI 10"
 
-ENV DATAPLANE_VERSION=3.3.3 \
-    DATAPLANE_URL_BASE=https://github.com/haproxytech/dataplaneapi/releases/download \
-    HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
+ENV HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
     HAPROXY_REPO_URL=https://www.haproxy.com/download/haproxy/performance/rhel/ha33/el10/x86_64
 
 RUN set -eux; \
@@ -80,6 +78,13 @@ RUN set -eux; \
 
 COPY --from=builder /tmp/rootfs/ /
 
+# haproxy-awslc gets installed again here even though the builder stage
+# already installed it into /tmp/rootfs: COPY --from=builder only copies
+# files, not rpmdb records, so this image's own rpm database doesn't know
+# about it yet (rpm -q would report "not installed"). What the copy above
+# actually buys us is the repo file + imported GPG key the builder stage set
+# up, which is what lets this microdnf install succeed without redoing
+# either -- and which properly registers the package in this stage's rpmdb.
 RUN set -eux; \
     microdnf -y update; \
     microdnf -y install \
@@ -88,7 +93,6 @@ RUN set -eux; \
     rpm -ivh /tmp/dataplaneapi_linux_amd64.rpm; \
     rm /tmp/dataplaneapi_linux_amd64.rpm; \
     rpm -q haproxy-awslc; \
-    microdnf -y update; \
     haproxy -v; \
     microdnf clean all; \
     rm -rf /var/cache/dnf /var/cache/yum /tmp/*; \
@@ -120,7 +124,6 @@ RUN set -eux; \
 COPY scripts/ /usr/local/bin/
 COPY haproxy.cfg /etc/haproxy/haproxy.cfg
 COPY conf.d/ /etc/haproxy/conf.d/
-COPY certs/ /etc/haproxy/certs/
 COPY acme/ /etc/haproxy/acme/
 COPY dataplaneapi.yaml /etc/haproxy/dataplaneapi.yaml
 

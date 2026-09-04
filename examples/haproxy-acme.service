@@ -10,8 +10,8 @@
 #   sudo systemctl enable --now haproxy-acme.service
 #
 # Reload the domain list at runtime without restarting:
-#   sudo podman kill -s HUP   haproxy-acme   # (or) edit domains.txt and wait for the poll
 #   sudo podman kill -s USR1  haproxy-acme   # force an immediate ACME reload
+#   (or) edit domains.txt and wait for the next poll
 
 [Unit]
 Description=HAProxy 3.3 (UBI10) + Data Plane API + ACME DNS-01 agent

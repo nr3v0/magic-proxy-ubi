@@ -44,7 +44,7 @@ services:
 
     volumes:
       # Frontend/backend config. Populate with either the bundled demo
-      # (examples/conf.d/*.cfg from this repo) or your own real config --
+      # (ubi10/conf.d/*.cfg from this repo) or your own real config --
       # mounting here replaces the image's baked-in demo entirely.
       - /share/Container/magic-proxy-ubi/conf.d:/etc/haproxy/conf.d
 

@@ -3,10 +3,16 @@
 # Supervises HAProxy and the Data Plane API as a single container process.
 set -eu
 
-MAIN_CFG="/etc/haproxy/haproxy.cfg"
-CONF_DIR="/etc/haproxy/conf.d"
-PIDFILE="/var/lib/haproxy/haproxy.pid"
+MAIN_CFG="${HAPROXY_CFG_FILE:-/etc/haproxy/haproxy.cfg}"
+CONF_DIR="${HAPROXY_CONF_D_DIR:-/etc/haproxy/conf.d}"
+PIDFILE="${HAPROXY_PIDFILE:-/var/lib/haproxy/haproxy.pid}"
+# This is a separate, entrypoint-only readiness-poll socket (passed to
+# `haproxy -S` below) -- not the `stats socket` haproxy.cfg itself defines
+# for the Data Plane API. No HAPROXY_*_DIR env var backs it; it's local to
+# this script.
 HAPROXY_SOCKET="/run/haproxy/admin.sock"
+# No corresponding HAPROXY_*_DIR env var exists for the Data Plane API's own
+# config file path (only the dirs it reads/writes have one).
 DP_CFG="/etc/haproxy/dataplaneapi.yaml"
 
 # Container-arg convention: a leading "-" means HAProxy flags (the default
