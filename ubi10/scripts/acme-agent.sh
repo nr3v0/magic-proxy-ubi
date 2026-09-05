@@ -6,6 +6,10 @@
 # certificates, then hands each cert to HAProxy through the Data Plane API
 # (see acme-deploy-dataplane.sh, wired in as acme.sh's --reloadcmd).
 #
+# One certificate PER domain (not one multi-SAN cert covering every domain
+# in the list) -- each is issued and renewed independently, so a DNS-01
+# problem with any single domain can't block issuance for the rest.
+#
 # Runs as a long‑lived background daemon launched by the container entrypoint
 # when ACME_ENABLED=true. It never exits on transient failure so the container
 # stays up; errors are logged and retried on the next cycle.
@@ -81,7 +85,6 @@ reload_domains_on_signal() {
         idle_forever
     fi
     domains_list="$new_list"
-    MAIN_DOMAIN="${new_list%% *}"
     log "Domains reloaded via SIGUSR1 – new list: '$new_list'"
 }
 
@@ -110,15 +113,14 @@ if [ -z "${PORKBUN_API_KEY:-}" ] || [ -z "${PORKBUN_SECRET_API_KEY:-}" ]; then
 fi
 export PORKBUN_API_KEY PORKBUN_SECRET_API_KEY
 
-# The first domain is the cert/account identity. The -d argument list itself
-# is built inside issue_or_renew(), right before invoking acme.sh -- shell
-# functions get their own positional parameters ($@) on each call, so a list
-# built here via `set --` would not survive being read back out inside a
-# separately-invoked function.
-MAIN_DOMAIN="${domains_list%% *}"
-
-cert_exists() {
-    [ -d "$LE_CONFIG_HOME/$MAIN_DOMAIN" ] || [ -d "${LE_CONFIG_HOME}/${MAIN_DOMAIN}_ecc" ]
+# One certificate PER domain, not one multi-SAN cert covering all of them --
+# each domain is issued/tracked independently by acme.sh (keyed by its own
+# $LE_CONFIG_HOME/<domain> directory) so a DNS-01 failure on any single
+# domain (rate limit, a stale/missing DNS record, etc.) can't block
+# issuance for every other domain in the list.
+cert_exists_for() {
+    d="$1"
+    [ -d "$LE_CONFIG_HOME/$d" ] || [ -d "${LE_CONFIG_HOME}/${d}_ecc" ]
 }
 
 # Register an ACME account up front (idempotent; some CAs require an email).
@@ -128,24 +130,19 @@ if [ -n "$ACME_EMAIL" ]; then
 fi
 
 issue_or_renew() {
-    if cert_exists; then
-        log "checking renewal for $MAIN_DOMAIN"
-        # --cron renews only certs that are due and reruns their stored reloadcmd.
-        "$ACME_SH" --cron || log "renewal cycle returned non-zero (will retry)"
-    else
-        log "issuing certificate for: $domains_list"
-        # Build the -d argument list here, in the same function invocation
-        # that uses it -- see the note above MAIN_DOMAIN for why this can't
-        # be built anywhere else and passed in via "$@".
-        set --
-        for d in $domains_list; do
-            set -- "$@" -d "$d"
-        done
-        # shellcheck disable=SC2086
-        "$ACME_SH" --issue --server "$ACME_CA" --dns dns_porkbun "$@" \
+    for d in $domains_list; do
+        if cert_exists_for "$d"; then
+            continue
+        fi
+        log "issuing certificate for: $d"
+        "$ACME_SH" --issue --server "$ACME_CA" --dns dns_porkbun -d "$d" \
             --reloadcmd "$DEPLOY_HOOK" ${ACME_EXTRA_ARGS:-} || \
-            log "issue failed; will retry next cycle"
-    fi
+            log "issue failed for $d; will retry next cycle"
+    done
+    # --cron renews (across all domains issued above, in past cycles, or
+    # already present before this container started) only the certs that
+    # are due, and reruns each one's own stored reloadcmd.
+    "$ACME_SH" --cron || log "renewal cycle returned non-zero (will retry)"
 }
 
 # Install signal handler for hot-reload of domain list.
@@ -183,7 +180,6 @@ while true; do
                 log "Domain file now empty – idling until domains are added."
                 idle_forever
             fi
-            MAIN_DOMAIN="${domains_list%% *}"
             last_mtime="$current_mtime"
             log "Domains file changed (mtime) – new list: '$domains_list'"
         fi
