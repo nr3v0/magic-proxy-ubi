@@ -80,11 +80,7 @@ reload_domains_on_signal() {
         log "No domains configured after reload – idling."
         idle_forever
     fi
-    # Rebuild the positional parameters ($@) for the next issuance/renewal.
-    set --
-    for d in $new_list; do
-        set -- "$@" -d "$d"
-    done
+    domains_list="$new_list"
     MAIN_DOMAIN="${new_list%% *}"
     log "Domains reloaded via SIGUSR1 – new list: '$new_list'"
 }
@@ -114,12 +110,11 @@ if [ -z "${PORKBUN_API_KEY:-}" ] || [ -z "${PORKBUN_SECRET_API_KEY:-}" ]; then
 fi
 export PORKBUN_API_KEY PORKBUN_SECRET_API_KEY
 
-# Build the -d argument list; the first domain is the cert/account identity.
-# set -f (above) keeps wildcard domains like *.example.com from glob-expanding.
-set --
-for d in $domains_list; do
-    set -- "$@" -d "$d"
-done
+# The first domain is the cert/account identity. The -d argument list itself
+# is built inside issue_or_renew(), right before invoking acme.sh -- shell
+# functions get their own positional parameters ($@) on each call, so a list
+# built here via `set --` would not survive being read back out inside a
+# separately-invoked function.
 MAIN_DOMAIN="${domains_list%% *}"
 
 cert_exists() {
@@ -139,6 +134,13 @@ issue_or_renew() {
         "$ACME_SH" --cron || log "renewal cycle returned non-zero (will retry)"
     else
         log "issuing certificate for: $domains_list"
+        # Build the -d argument list here, in the same function invocation
+        # that uses it -- see the note above MAIN_DOMAIN for why this can't
+        # be built anywhere else and passed in via "$@".
+        set --
+        for d in $domains_list; do
+            set -- "$@" -d "$d"
+        done
         # shellcheck disable=SC2086
         "$ACME_SH" --issue --server "$ACME_CA" --dns dns_porkbun "$@" \
             --reloadcmd "$DEPLOY_HOOK" ${ACME_EXTRA_ARGS:-} || \
@@ -181,11 +183,6 @@ while true; do
                 log "Domain file now empty – idling until domains are added."
                 idle_forever
             fi
-            # Re‑build the -d arguments for the next issuance/renewal.
-            set --
-            for d in $domains_list; do
-                set -- "$@" -d "$d"
-            done
             MAIN_DOMAIN="${domains_list%% *}"
             last_mtime="$current_mtime"
             log "Domains file changed (mtime) – new list: '$domains_list'"
