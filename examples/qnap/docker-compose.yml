@@ -1,0 +1,72 @@
+# QNAP Container Station template. Import via Container Station -> Applications
+# -> Create -> "Create Application" (Compose), or `docker compose up -d` over
+# SSH. See README.md in this directory for full setup steps and QNAP-specific
+# gotchas (shared-folder permissions, port conflicts with QTS's own admin UI).
+#
+# Every /share/Container/magic-proxy-ubi/... path below is a placeholder -- find
+# and replace it with your NAS's actual shared folder layout before deploying
+# (e.g. `sed -i 's#/share/Container/magic-proxy-ubi#/share/CACHEDEV1_DATA/haproxy#'
+# docker-compose.yml`). Create the directories first (see README.md).
+
+services:
+  haproxy:
+    image: ghcr.io/yourorg/magic-proxy-ubi:latest
+    container_name: magic-proxy-ubi
+    restart: unless-stopped
+
+    # HOST:CONTAINER. Left side is what QTS itself binds to as well (commonly
+    # 8080/443 for the admin UI) -- check Control Panel -> System -> General
+    # -> System Administration first and remap the left side if it conflicts.
+    ports:
+      - "80:80"        # http
+      - "443:443"      # https, TLS-terminating
+      - "8444:8444"    # https, SNI-passthrough (only used if your conf.d has it)
+      - "6443:6443"    # OpenShift api-server passthrough (only used if your conf.d has it)
+      - "22623:22623"  # OpenShift machine-config-server passthrough (same)
+      - "8404:8404"    # HAProxy stats
+      - "5555:5555"    # Data Plane API -- consider NOT publishing this externally;
+                        # bind to 127.0.0.1 (e.g. "127.0.0.1:5555:5555") or drop it
+                        # from `ports:` entirely if you don't need remote access.
+
+    # 80/443 are privileged ports; the haproxy binary carries the
+    # cap_net_bind_service file capability (set at image build time), which
+    # normally suffices since QNAP's dockerd includes that capability by
+    # default. Listed explicitly anyway in case your Container Station
+    # security profile has dropped it.
+    cap_add:
+      - NET_BIND_SERVICE
+
+    environment:
+      # Change before deploying -- this authenticates the Data Plane API.
+      DATAPLANE_USER: admin
+      DATAPLANE_PASS: change-me
+
+      # ACME (Let's Encrypt via Porkbun DNS-01). Leave ACME_ENABLED=false and
+      # remove the rest if you're managing certs another way.
+      ACME_ENABLED: "false"
+      ACME_CA: letsencrypt
+      ACME_DOMAINS_FILE: /etc/haproxy/acme/domains.txt
+      ACME_EMAIL: you@example.com
+      PORKBUN_API_KEY: pk1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      PORKBUN_SECRET_API_KEY: sk1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+    volumes:
+      # Frontend/backend config. Populate with either the bundled demo
+      # (ubi10/conf.d/*.cfg from this repo) or your own real config --
+      # mounting here replaces the image's baked-in demo entirely.
+      - /share/Container/magic-proxy-ubi/conf.d:/etc/haproxy/conf.d
+
+      # ACME account/cert state and domains.txt (put domains.txt directly in
+      # this folder on the host -- no separate mount needed for it).
+      - /share/Container/magic-proxy-ubi/acme:/etc/haproxy/acme
+
+      # PEM files HAProxy actually serves -- always persist alongside acme/.
+      - /share/Container/magic-proxy-ubi/certs:/etc/haproxy/certs
+
+      # Optional: only needed if you manage these via the Data Plane API and
+      # want the state to survive the container being recreated. Safe to
+      # remove any of the four below if you don't use them.
+      - /share/Container/magic-proxy-ubi/maps:/etc/haproxy/maps
+      - /share/Container/magic-proxy-ubi/backups:/etc/haproxy/backups
+      - /share/Container/magic-proxy-ubi/spoe:/etc/haproxy/spoe
+      - /share/Container/magic-proxy-ubi/dataplane-storage:/etc/haproxy/dataplane-storage

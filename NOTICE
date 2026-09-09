@@ -1,0 +1,57 @@
+magic-proxy-ubi
+Copyright (c) 2026 Nate Revo
+
+This product's repository source (Containerfile, scripts, configuration,
+examples, and documentation) is licensed under the MIT License; see the LICENSE
+file. The MIT license applies ONLY to the files in this repository.
+
+Container images built from this repository bundle third-party software, each
+under its own license. These components are combined by aggregation and retain
+their original licenses:
+
+  - Red Hat Universal Base Image 10 (ubi, ubi-minimal)
+    License: Red Hat Universal Base Image End User License Agreement (UBI EULA)
+    https://www.redhat.com/licenses/EULA_Red_Hat_Universal_Base_Image_English_20190422.pdf
+
+  - HAProxy (haproxy-awslc)
+    License: GPL-2.0-or-later (portions LGPL-2.1)
+    https://github.com/haproxy/haproxy
+
+  - AWS-LC (linked into haproxy-awslc as its TLS/crypto backend --
+    confirmed via `haproxy -vv`: "Running on SSL library version : AWS-LC")
+    License: Apache-2.0 OR ISC
+    https://github.com/aws/aws-lc
+
+  - HAProxy Data Plane API
+    License: Apache-2.0
+    https://github.com/haproxytech/dataplaneapi
+
+  - acme.sh
+    License: GPL-3.0
+    https://github.com/acmesh-official/acme.sh
+    Vendored at the git ref named by the Containerfile's ACME_SH_REF build
+    arg (default: master, a floating branch) -- pin this to a specific tag
+    or commit (`--build-arg ACME_SH_REF=<ref>`, see README.md "Versions &
+    Dependencies") for a reproducible, defensible record of exactly which
+    acme.sh source a given image was built from.
+
+Additional packages installed from the Red Hat UBI repositories carry their own
+upstream licenses (predominantly GPL, LGPL, MIT, and BSD variants). For the
+authoritative, per-package list for a built image, run:
+
+    rpm -qa --qf '%{NAME} %{VERSION} %{LICENSE}\n' | sort
+
+HAProxy's GPL text includes an exception permitting linking with OpenSSL
+specifically, which doesn't name AWS-LC. That exception isn't actually needed
+here, though: haproxy-awslc is GPL-2.0-*or-later* (confirmed via its RPM
+LICENSE metadata), so the combined work can be distributed under GPLv3 terms,
+and the FSF recognizes Apache-2.0 (AWS-LC's license) as GPLv3-compatible.
+
+Enabling the ACME agent means whoever runs the container is agreeing to Let's
+Encrypt's Subscriber Agreement (https://letsencrypt.org/repository/) on
+account registration, and to Porkbun's API Terms of Service if DNS-01 via
+Porkbun is used -- usage-policy matters for the operator, not redistribution
+terms for this repository.
+
+Redistribution of the built image is additionally subject to the Red Hat UBI
+EULA. This NOTICE is informational and is not legal advice.

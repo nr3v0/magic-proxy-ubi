@@ -1,0 +1,167 @@
+FROM registry.access.redhat.com/ubi10/ubi-minimal
+
+LABEL name="magic-proxy-ubi" \
+      vendor="Custom" \
+      summary="HAProxy 3.3 AWS-LC on UBI 10" \
+      description="HAProxy AWS-LC package from HAProxyTech repo with Data Plane API on UBI 10"
+
+ENV HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
+    HAPROXY_REPO_URL=https://www.haproxy.com/download/haproxy/performance/rhel/ha33/el10/x86_64 \
+    HAPROXY_CFG_DIR=/etc/haproxy \
+    HAPROXY_CFG_FILE=/etc/haproxy/haproxy.cfg \
+    HAPROXY_CONF_D_DIR=/etc/haproxy/conf.d \
+    HAPROXY_STATE_DIR=/var/lib/haproxy \
+    HAPROXY_RUN_DIR=/var/lib/haproxy \
+    HAPROXY_PIDFILE=/var/lib/haproxy/haproxy.pid \
+    HAPROXY_CERT_DIR=/etc/haproxy/certs \
+    HAPROXY_BACKUP_DIR=/etc/haproxy/backups \
+    HAPROXY_MAPS_DIR=/etc/haproxy/maps \
+    HAPROXY_SPOE_DIR=/etc/haproxy/spoe \
+    HAPROXY_DATAPLANE_STORAGE_DIR=/etc/haproxy/dataplane-storage \
+    HAPROXY_ACME_DIR=/etc/haproxy/acme \
+    DATAPLANE_VERSION=3.3.3 \
+    DATAPLANE_URL_BASE=https://github.com/haproxytech/dataplaneapi/releases/download \
+    HOME=/tmp \
+    LE_WORKING_DIR=/usr/local/share/acme.sh \
+    LE_CONFIG_HOME=/etc/haproxy/acme \
+    ACME_ENABLED=false \
+    ACME_CA=letsencrypt \
+    ACME_DOMAINS="" \
+    ACME_DOMAINS_FILE=/etc/haproxy/acme/acme_domains.txt \
+    ACME_EMAIL="" \
+    ACME_RENEW_INTERVAL=43200 \
+    DATAPLANE_URL=http://127.0.0.1:5555 \
+    DATAPLANE_USER=admin \
+    DATAPLANE_PASS=change-me
+
+# findutils/tar are genuinely used at build time (find for the setgid/perm
+# fixups below, tar to unpack acme.sh) -- tried installing-and-removing them
+# within a single layer to avoid persistent size, but each install/remove
+# cycle grows RPM's own database by more than the ~1-3MB the packages
+# themselves cost, so they're just kept installed persistently instead (gzip
+# is already a base dependency via cracklib either way). procps-ng isn't
+# used anywhere (build or runtime) and is dropped entirely -- that one's a
+# clean win since it was never conditionally needed.
+RUN set -eux; \
+    microdnf -y update; \
+    microdnf -y install \
+        findutils \
+        openssl \
+        ca-certificates \
+        tar; \
+    microdnf clean all; \
+    rm -rf /var/cache/dnf /var/cache/yum /tmp/*
+
+# haproxy-awslc isn't in any UBI repo, so add HAProxyTech's repo directly
+# against this image's own rpmdb -- no separate builder/installroot stage
+# needed. (A prior version of this Containerfile built haproxy-awslc into an
+# empty --installroot in a separate stage and COPY'd the whole result in;
+# that installroot has to bootstrap its own base OS from scratch to satisfy
+# haproxy-awslc's dependencies, which added ~270MB of duplicate base-system
+# files on top of this image's own base for no benefit -- haproxy-awslc's
+# only real *new* dependency beyond what's already here is awslc-libs.)
+RUN set -eux; \
+    rpm --import "${HAPROXY_GPG_KEY_URL}"; \
+    printf '[haproxy-ha33]\nname=HAProxy 3.3 AWS-LC for RHEL10\nbaseurl=%s\nenabled=1\ngpgcheck=1\n' "${HAPROXY_REPO_URL}" > /etc/yum.repos.d/haproxy.repo; \
+    microdnf -y update; \
+    microdnf -y install \
+        haproxy-awslc \
+        libcap; \
+    curl -fsSL  ${DATAPLANE_URL_BASE}/v${DATAPLANE_VERSION}/dataplaneapi_${DATAPLANE_VERSION}_linux_amd64.rpm -o /tmp/dataplaneapi_linux_amd64.rpm; \
+    rpm -ivh /tmp/dataplaneapi_linux_amd64.rpm; \
+    rm /tmp/dataplaneapi_linux_amd64.rpm; \
+    rpm -q haproxy-awslc; \
+    haproxy -v; \
+    # Grant the non-root haproxy process (USER 1001, see below) permission to
+    # bind privileged ports (80/443) via a file capability on the binary
+    # itself, rather than running as root. CAP_NET_BIND_SERVICE is already in
+    # Docker's/Podman's default container capability bounding set, so this
+    # alone is normally sufficient -- no --cap-add needed at `run` time.
+    setcap 'cap_net_bind_service=+ep' "$(command -v haproxy)"; \
+    microdnf clean all; \
+    rm -rf /var/cache/dnf /var/cache/yum /tmp/*; \
+    mkdir -p "${HAPROXY_CFG_DIR}" "${HAPROXY_CONF_D_DIR}" "${HAPROXY_STATE_DIR}" "${HAPROXY_CERT_DIR}" "${HAPROXY_BACKUP_DIR}" "${HAPROXY_MAPS_DIR}" "${HAPROXY_SPOE_DIR}" "${HAPROXY_DATAPLANE_STORAGE_DIR}" "${HAPROXY_ACME_DIR}" /run/haproxy /tmp/haproxy /tmp/haproxy-transactions /tmp/spoe-haproxy; \
+    chgrp -R 0 "${HAPROXY_CFG_DIR}" "${HAPROXY_STATE_DIR}" "${HAPROXY_CERT_DIR}" "${HAPROXY_BACKUP_DIR}" "${HAPROXY_MAPS_DIR}" "${HAPROXY_SPOE_DIR}" "${HAPROXY_DATAPLANE_STORAGE_DIR}" "${HAPROXY_ACME_DIR}" /run/haproxy /tmp/haproxy /tmp/haproxy-transactions /tmp/spoe-haproxy /tmp; \
+    chmod -R g=u "${HAPROXY_CFG_DIR}" "${HAPROXY_STATE_DIR}" "${HAPROXY_CERT_DIR}" "${HAPROXY_BACKUP_DIR}" "${HAPROXY_MAPS_DIR}" "${HAPROXY_SPOE_DIR}" "${HAPROXY_DATAPLANE_STORAGE_DIR}" "${HAPROXY_ACME_DIR}" /run/haproxy /tmp/haproxy /tmp/haproxy-transactions /tmp/spoe-haproxy /tmp; \
+    find "${HAPROXY_CFG_DIR}" "${HAPROXY_STATE_DIR}" "${HAPROXY_CERT_DIR}" "${HAPROXY_ACME_DIR}" /run/haproxy /tmp/haproxy -type d -exec chmod g+s {} \;
+
+# Install acme.sh (full tree, so the dns_porkbun DNS-01 plugin is available) and
+# generate a throwaway self-signed bootstrap cert so the HTTPS frontend can bind
+# on :443 before the ACME agent issues the first real certificate.
+ARG ACME_SH_REF=master
+RUN set -eux; \
+    mkdir -p "${LE_WORKING_DIR}"; \
+    curl -fsSL "https://github.com/acmesh-official/acme.sh/archive/${ACME_SH_REF}.tar.gz" -o /tmp/acme.sh.tar.gz; \
+    tar -xzf /tmp/acme.sh.tar.gz -C /tmp; \
+    cp -a /tmp/acme.sh-*/. "${LE_WORKING_DIR}/"; \
+    chmod 0755 "${LE_WORKING_DIR}/acme.sh"; \
+    test -f "${LE_WORKING_DIR}/dnsapi/dns_porkbun.sh"; \
+    rm -rf /tmp/acme.sh*; \
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+        -keyout /tmp/bootstrap.key -out /tmp/bootstrap.crt \
+        -subj "/CN=bootstrap.invalid"; \
+    cat /tmp/bootstrap.crt /tmp/bootstrap.key > "${HAPROXY_CERT_DIR}/bootstrap.pem"; \
+    rm -f /tmp/bootstrap.key /tmp/bootstrap.crt; \
+    chgrp 0 "${HAPROXY_CERT_DIR}/bootstrap.pem"; \
+    chmod 0640 "${HAPROXY_CERT_DIR}/bootstrap.pem"
+
+COPY scripts/ /usr/local/bin/
+COPY haproxy.cfg /etc/haproxy/haproxy.cfg
+COPY conf.d/ /etc/haproxy/conf.d/
+COPY acme/ /etc/haproxy/acme/
+COPY dataplaneapi.yaml /etc/haproxy/dataplaneapi.yaml
+
+RUN set -eux; \
+    chgrp 0 /usr/local/bin/container-entrypoint-dataplane.sh \
+        /usr/local/bin/haproxy-reload.sh \
+        /etc/haproxy/haproxy.cfg \
+        /etc/haproxy/dataplaneapi.yaml; \
+    chmod 0755 /usr/local/bin/*.sh; \
+    chmod 0644 /etc/haproxy/haproxy.cfg; \
+    chmod 0640 /etc/haproxy/dataplaneapi.yaml; \
+    find /etc/haproxy/conf.d /etc/haproxy/acme -type f -exec chmod 0644 {} \;
+
+# Create an unprivileged default user (uid 1001, primary gid 0). Every writable
+# dir is group-0 / g=u with the setgid bit, so the container runs as its default
+# non-root user and also works under any other UID you assign at runtime
+# (e.g. `podman run --user`).
+RUN set -eux; \
+    echo "haproxy:x:1001:0:HAProxy:/tmp:/sbin/nologin" >> /etc/passwd
+
+EXPOSE 80 443 8444 6443 22623 8404 5555
+
+# /etc/haproxy/conf.d/ is a volume mount point. The demo frontend/backend
+# config baked in above (from ubi10/conf.d/) populates it by default -- Docker
+# and Podman both copy an image directory's existing content into a fresh
+# anonymous volume -- but mounting a host directory here masks it entirely,
+# e.g. `-v $(pwd)/prod/conf.d:/etc/haproxy/conf.d:Z` for a real deployment
+# (see prod/conf.d/ and CLAUDE.md).
+#
+# The rest are also volume mount points: state the ACME agent and Data Plane
+# API write at runtime, which must survive container restarts -- without a
+# mount, a fresh anonymous volume is created on every `podman run` (still
+# pre-populated from image content, e.g. the bootstrap cert in certs/), so
+# certs get re-issued (hitting Let's Encrypt rate limits) and any maps/backups
+# edits made via the API vanish. Each corresponds to a HAPROXY_*_DIR ENV
+# above and a dataplaneapi.yaml resources:/transaction: key:
+#   /etc/haproxy/certs             ssl_certs_dir      -- ACME agent deploys real certs here
+#   /etc/haproxy/acme               LE_CONFIG_HOME     -- acme.sh account/state/certs
+#   /etc/haproxy/spoe                spoe_dir           -- SPOE agent config, if used
+#   /etc/haproxy/dataplane-storage  dataplane_storage_dir -- misc Data Plane API storage
+#   /etc/haproxy/maps                maps_dir           -- live-editable HAProxy map files
+#   /etc/haproxy/backups             backups_dir        -- Data Plane API's config edit history
+VOLUME ["/etc/haproxy/conf.d", "/etc/haproxy/certs", "/etc/haproxy/acme", "/etc/haproxy/spoe", "/etc/haproxy/dataplane-storage", "/etc/haproxy/maps", "/etc/haproxy/backups"]
+
+#STOPSIGNAL SIGUSR1
+STOPSIGNAL SIGTERM
+
+# Liveness probe: the unauthenticated HAProxy stats endpoint on :8404 answers
+# 200 once HAProxy is serving. If you remove the fe_stats frontend from conf.d/,
+# point this at another endpoint (e.g. an http frontend).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8404/stats >/dev/null 2>&1 || exit 1
+
+USER 1001
+
+ENTRYPOINT ["/usr/local/bin/container-entrypoint-dataplane.sh"]
+CMD ["-f", "/etc/haproxy/haproxy.cfg", "-f", "/etc/haproxy/conf.d/"]

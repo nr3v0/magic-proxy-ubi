@@ -1,0 +1,139 @@
+FROM registry.access.redhat.com/ubi10/ubi AS builder
+
+LABEL name="haproxy-builder" \
+      vendor="Custom" \
+      summary="Builder stage for HAProxy 3.3 AWS-LC and Data Plane API on UBI 10"
+
+ENV DATAPLANE_VERSION=3.3.3 \
+    DATAPLANE_URL_BASE=https://github.com/haproxytech/dataplaneapi/releases/download \
+    HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
+    HAPROXY_REPO_URL=https://www.haproxy.com/download/haproxy/performance/rhel/ha33/el10/x86_64
+
+RUN set -eux; \
+    dnf -y update; \
+    dnf -y install \
+        dnf-plugins-core \
+        curl \
+        rpm; \
+    mkdir -p /tmp/rootfs; \
+    rpm --import --root /tmp/rootfs "${HAPROXY_GPG_KEY_URL}"; \
+    dnf --installroot /tmp/rootfs --releasever 10 config-manager --add-repo "${HAPROXY_REPO_URL}"; \
+#    dnf --installroot /tmp/rootfs --releasever 10 -y install haproxy-awslc; \
+    curl -fsSL \
+      "${DATAPLANE_URL_BASE}/v${DATAPLANE_VERSION}/dataplaneapi_${DATAPLANE_VERSION}_linux_amd64.rpm" \
+      -o /tmp/dataplaneapi_linux_amd64.rpm; \
+    rpm -ivh --nodeps --root /tmp/rootfs /tmp/dataplaneapi_linux_amd64.rpm; \
+    rm -f /tmp/dataplaneapi_linux_amd64.rpm; \
+    cp -a /usr/sbin/haproxy /tmp/rootfs/usr/sbin/; \
+    mkdir -p /tmp/rootfs/usr/lib64 /tmp/rootfs/usr/libexec /tmp/rootfs/etc; \
+    ldd /usr/sbin/haproxy | awk '/=> \\/usr\\// {print $3}' | sort -u | xargs -r -I '{}' cp -a --parents '{}' /tmp/rootfs; \
+    if [ -d /etc/haproxy ]; then cp -a /etc/haproxy /tmp/rootfs/etc/; fi
+
+
+FROM registry.access.redhat.com/ubi10/ubi-minimal
+
+LABEL name="haproxy" \
+      vendor="Custom" \
+      summary="HAProxy 3.3 AWS-LC on UBI 10" \
+      description="HAProxy AWS-LC package from HAProxyTech repo with Data Plane API on UBI 10"
+
+ENV HAPROXY_CFG_DIR=/etc/haproxy \
+    HAPROXY_CFG_FILE=/etc/haproxy/haproxy.cfg \
+    HAPROXY_CONF_D_DIR=/etc/haproxy/conf.d \
+    HAPROXY_STATE_DIR=/var/lib/haproxy \
+    HAPROXY_RUN_DIR=/var/lib/haproxy \
+    HAPROXY_PIDFILE=/var/lib/haproxy/haproxy.pid \
+    HAPROXY_CERT_DIR=/etc/haproxy/certs \
+    HAPROXY_BACKUP_DIR=/etc/haproxy/backups \
+    HAPROXY_MAPS_DIR=/etc/haproxy/maps \
+    HAPROXY_SPOE_DIR=/etc/haproxy/spoe \
+    HAPROXY_DATAPLANE_STORAGE_DIR=/etc/haproxy/dataplane-storage \
+    HOME=/tmp
+
+RUN set -eux; \
+    microdnf -y update; \
+    microdnf -y install \
+        findutils \
+        procps-ng; \
+    microdnf clean all; \
+    rm -rf /var/cache/dnf /var/cache/yum /tmp/*
+
+COPY --from=builder /tmp/rootfs/ /
+
+RUN set -eux; \
+    microdnf -y install haproxy-awslc; \
+    mkdir -p \
+        "${HAPROXY_CFG_DIR}" \
+        "${HAPROXY_CONF_D_DIR}" \
+        "${HAPROXY_STATE_DIR}" \
+        "${HAPROXY_CERT_DIR}" \
+        "${HAPROXY_BACKUP_DIR}" \
+        "${HAPROXY_MAPS_DIR}" \
+        "${HAPROXY_SPOE_DIR}" \
+        "${HAPROXY_DATAPLANE_STORAGE_DIR}" \
+        /run/haproxy \
+        /tmp/haproxy \
+        /tmp/haproxy-transactions \
+        /tmp/spoe-haproxy; \
+    chgrp -R 0 \
+        "${HAPROXY_CFG_DIR}" \
+        "${HAPROXY_STATE_DIR}" \
+        "${HAPROXY_CERT_DIR}" \
+        "${HAPROXY_BACKUP_DIR}" \
+        "${HAPROXY_MAPS_DIR}" \
+        "${HAPROXY_SPOE_DIR}" \
+        "${HAPROXY_DATAPLANE_STORAGE_DIR}" \
+        /run/haproxy \
+        /tmp/haproxy \
+        /tmp/haproxy-transactions \
+        /tmp/spoe-haproxy \
+        /tmp; \
+    chmod -R g=u \
+        "${HAPROXY_CFG_DIR}" \
+        "${HAPROXY_STATE_DIR}" \
+        "${HAPROXY_CERT_DIR}" \
+        "${HAPROXY_BACKUP_DIR}" \
+        "${HAPROXY_MAPS_DIR}" \
+        "${HAPROXY_SPOE_DIR}" \
+        "${HAPROXY_DATAPLANE_STORAGE_DIR}" \
+        /run/haproxy \
+        /tmp/haproxy \
+        /tmp/haproxy-transactions \
+        /tmp/spoe-haproxy \
+        /tmp; \
+    find \
+        "${HAPROXY_CFG_DIR}" \
+        "${HAPROXY_STATE_DIR}" \
+        "${HAPROXY_CERT_DIR}" \
+        /run/haproxy \
+        /tmp/haproxy \
+        -type d -exec chmod g+s {} \;
+
+COPY scripts/ /usr/local/bin/
+COPY haproxy.cfg /etc/haproxy/haproxy.cfg
+COPY conf.d/ /etc/haproxy/conf.d/
+COPY certs/ /etc/haproxy/certs/
+COPY dataplaneapi.yaml /etc/haproxy/dataplaneapi.yaml
+
+RUN set -eux; \
+    chgrp 0 \
+        /usr/sbin/haproxy \
+        /usr/sbin/dataplaneapi \
+        /usr/local/bin/container-entrypoint-dataplane.sh \
+        /usr/local/bin/haproxy-reload.sh \
+        /etc/haproxy/haproxy.cfg \
+        /etc/haproxy/dataplaneapi.yaml; \
+    chmod 0755 \
+        /usr/sbin/haproxy \
+        /usr/sbin/dataplaneapi \
+        /usr/local/bin/*.sh; \
+    chmod 0644 /etc/haproxy/haproxy.cfg; \
+    chmod 0640 /etc/haproxy/dataplaneapi.yaml; \
+    find /etc/haproxy/conf.d /etc/haproxy/certs -type f -exec chmod 0644 {} \;
+
+EXPOSE 8080 8443 8404 5555
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/usr/local/bin/container-entrypoint-dataplane.sh"]
+CMD ["-f", "/etc/haproxy/haproxy.cfg", "-f", "/etc/haproxy/conf.d/"]
