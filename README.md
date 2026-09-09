@@ -58,7 +58,7 @@ The image runs as a non‑root user: all writable directories are group‑owned 
 
 ```bash
 # Clone the repo (if you haven’t already)
-git clone https://github.com/yourorg/magic-proxy-ubi.git
+git clone https://github.com/nr3v0/magic-proxy-ubi.git
 cd magic-proxy-ubi
 
 # Build (context is the ubi10/ directory)
@@ -321,7 +321,7 @@ sudo systemctl daemon-reload
 sudo systemctl start magic-proxy.service
 ```
 
-> Both units reference `ghcr.io/yourorg/magic-proxy-ubi:latest` — change the `Image=`/`IMAGE=` line to your registry path (or `localhost/magic-proxy-ubi:latest` for a locally built image).
+> Both units reference `quay.openshift.works/nrevo/magic-proxy-ubi:latest` — change the `Image=`/`IMAGE=` line to your registry path (or `localhost/magic-proxy-ubi:latest` for a locally built image).
 
 ---  
 

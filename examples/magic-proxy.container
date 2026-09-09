@@ -17,7 +17,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Container]
-Image=ghcr.io/yourorg/magic-proxy-ubi:latest
+Image=quay.openshift.works/nrevo/magic-proxy-ubi:latest
 ContainerName=magic-proxy
 EnvironmentFile=/etc/magic-proxy/acme.env
 Volume=/etc/magic-proxy/domains.txt:/etc/haproxy/acme/domains.txt:ro,Z

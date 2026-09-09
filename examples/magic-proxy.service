@@ -19,7 +19,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-Environment=IMAGE=ghcr.io/yourorg/magic-proxy-ubi:latest
+Environment=IMAGE=quay.openshift.works/nrevo/magic-proxy-ubi:latest
 # Pre-pull so the unit fails fast if the image is unavailable.
 ExecStartPre=-/usr/bin/podman pull ${IMAGE}
 ExecStartPre=-/usr/bin/podman rm -f magic-proxy

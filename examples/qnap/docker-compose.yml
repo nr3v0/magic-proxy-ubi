@@ -10,7 +10,7 @@
 
 services:
   haproxy:
-    image: ghcr.io/yourorg/magic-proxy-ubi:latest
+    image: quay.openshift.works/nrevo/magic-proxy-ubi:latest
     container_name: magic-proxy-ubi
     restart: unless-stopped
 
