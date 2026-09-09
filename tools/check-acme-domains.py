@@ -40,13 +40,20 @@ ACL_RE = re.compile(
 
 
 def load_domains(path):
+    """A line may be one domain, or several comma-separated domains that
+    acme-agent.sh issues as SANs on one shared certificate -- check each
+    individually against the ACLs regardless of how they're grouped into
+    certs."""
     domains = []
     with open(path) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            domains.append(line)
+            for domain in line.split(","):
+                domain = domain.strip()
+                if domain:
+                    domains.append(domain)
     return domains
 
 

@@ -58,7 +58,7 @@ The image runs as a non‑root user: all writable directories are group‑owned 
 
 ```bash
 # Clone the repo (if you haven’t already)
-git clone https://github.com/yourorg/magic-proxy-ubi.git
+git clone https://github.com/nr3v0/magic-proxy-ubi.git
 cd magic-proxy-ubi
 
 # Build (context is the ubi10/ directory)
@@ -113,7 +113,7 @@ Values marked **required** must be present for the respective feature to work; o
 | Variable | Required? | Default | Description |
 |----------|-----------|---------|-------------|
 | `ACME_DOMAINS` | **Yes**, unless `ACME_DOMAINS_FILE` points at a file with real entries | – | Space‑separated list of domains for which to request/renew certificates (e.g. `"example.com *.example.com"`), used whenever `ACME_DOMAINS_FILE`'s file is empty/all‑comments (including the image's own default, below). |
-| `ACME_DOMAINS_FILE` | **No** | `/etc/haproxy/acme/acme_domains.txt` | Path (inside the container) to a file containing one domain per line; lines beginning with `#` are ignored. The image ships this default file with everything commented out — `ACME_ENABLED=true` alone is a safe no‑op until you edit it in, mount your own file over it, point this elsewhere, or just set `ACME_DOMAINS`. If the file actually has entries, it takes precedence over `ACME_DOMAINS`. |
+| `ACME_DOMAINS_FILE` | **No** | `/etc/haproxy/acme/acme_domains.txt` | Path (inside the container) to a file containing one entry per line; lines beginning with `#` are ignored. Each line is its own independent certificate by default — list several domains comma‑separated on one line (e.g. `a.example.com, b.example.com`) to issue those together as SANs on a single shared certificate instead. The image ships this default file with everything commented out — `ACME_ENABLED=true` alone is a safe no‑op until you edit it in, mount your own file over it, point this elsewhere, or just set `ACME_DOMAINS`. If the file actually has entries, it takes precedence over `ACME_DOMAINS`. |
 | `PORKBUN_API_KEY` | **Yes** (if ACME enabled) | – | Porkbun API key (`pk1_…`). |
 | `PORKBUN_SECRET_API_KEY` | **Yes** (if ACME enabled) | – | Porkbun secret API key (`sk1_…`). |
 | `ACME_EMAIL` | **Recommended** | – | Email address for ACME account registration (used with `--register-account`). |
@@ -321,7 +321,7 @@ sudo systemctl daemon-reload
 sudo systemctl start magic-proxy.service
 ```
 
-> Both units reference `ghcr.io/yourorg/magic-proxy-ubi:latest` — change the `Image=`/`IMAGE=` line to your registry path (or `localhost/magic-proxy-ubi:latest` for a locally built image).
+> Both units reference `quay.openshift.works/nrevo/magic-proxy-ubi:latest` — change the `Image=`/`IMAGE=` line to your registry path (or `localhost/magic-proxy-ubi:latest` for a locally built image).
 
 ---  
 
