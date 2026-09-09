@@ -1,35 +1,3 @@
-FROM registry.access.redhat.com/ubi10/ubi AS builder
-
-LABEL name="magic-proxy-ubi-builder" \
-      vendor="Custom" \
-      summary="Builder stage for HAProxy 3.3 AWS-LC and Data Plane API on UBI 10"
-
-ENV HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
-    HAPROXY_REPO_URL=https://www.haproxy.com/download/haproxy/performance/rhel/ha33/el10/x86_64
-
-RUN set -eux; \
-    dnf -y update; \
-    dnf -y install \
-        dnf-plugins-core \
-        curl \
-        rpm; \
-    mkdir -p /tmp/rootfs; \
-    rpm --import --root /tmp/rootfs "${HAPROXY_GPG_KEY_URL}"; \
-    dnf --installroot /tmp/rootfs --releasever 10 config-manager --add-repo "${HAPROXY_REPO_URL}"; \
-    dnf --installroot /tmp/rootfs --releasever 10 -y update; \
-    dnf --installroot /tmp/rootfs --releasever 10 -y install haproxy-awslc; \
-    dnf clean all;
-#    curl -fsSL \
-#      "${DATAPLANE_URL_BASE}/v${DATAPLANE_VERSION}/dataplaneapi_${DATAPLANE_VERSION}_linux_amd64.rpm" \
-#      -o /tmp/dataplaneapi_linux_amd64.rpm; \
-#    rpm -ivh --nodeps --root /tmp/rootfs /tmp/dataplaneapi_linux_amd64.rpm; \
-#    rm -f /tmp/dataplaneapi_linux_amd64.rpm; \
-#    cp -a /usr/sbin/haproxy /tmp/rootfs/usr/sbin/; \
-#    mkdir -p /tmp/rootfs/usr/lib64 /tmp/rootfs/usr/libexec /tmp/rootfs/etc; \
-#    ldd /usr/sbin/haproxy | awk '/=> \\/usr\\// {print $3}' | sort -u | xargs -r -I '{}' cp -a --parents '{}' /tmp/rootfs; \
-#    if [ -d /etc/haproxy ]; then cp -a /etc/haproxy /tmp/rootfs/etc/; fi
-
-
 FROM registry.access.redhat.com/ubi10/ubi-minimal
 
 LABEL name="magic-proxy-ubi" \
@@ -37,7 +5,9 @@ LABEL name="magic-proxy-ubi" \
       summary="HAProxy 3.3 AWS-LC on UBI 10" \
       description="HAProxy AWS-LC package from HAProxyTech repo with Data Plane API on UBI 10"
 
-ENV HAPROXY_CFG_DIR=/etc/haproxy \
+ENV HAPROXY_GPG_KEY_URL=https://www.haproxy.com/download/haproxy/HAPROXY-key-community.asc \
+    HAPROXY_REPO_URL=https://www.haproxy.com/download/haproxy/performance/rhel/ha33/el10/x86_64 \
+    HAPROXY_CFG_DIR=/etc/haproxy \
     HAPROXY_CFG_FILE=/etc/haproxy/haproxy.cfg \
     HAPROXY_CONF_D_DIR=/etc/haproxy/conf.d \
     HAPROXY_STATE_DIR=/var/lib/haproxy \
@@ -64,36 +34,50 @@ ENV HAPROXY_CFG_DIR=/etc/haproxy \
     DATAPLANE_USER=admin \
     DATAPLANE_PASS=change-me
 
+# findutils/tar are genuinely used at build time (find for the setgid/perm
+# fixups below, tar to unpack acme.sh) -- tried installing-and-removing them
+# within a single layer to avoid persistent size, but each install/remove
+# cycle grows RPM's own database by more than the ~1-3MB the packages
+# themselves cost, so they're just kept installed persistently instead (gzip
+# is already a base dependency via cracklib either way). procps-ng isn't
+# used anywhere (build or runtime) and is dropped entirely -- that one's a
+# clean win since it was never conditionally needed.
 RUN set -eux; \
     microdnf -y update; \
     microdnf -y install \
         findutils \
-        procps-ng \
         openssl \
         ca-certificates \
-        tar \
-        gzip; \
+        tar; \
     microdnf clean all; \
     rm -rf /var/cache/dnf /var/cache/yum /tmp/*
 
-COPY --from=builder /tmp/rootfs/ /
-
-# haproxy-awslc gets installed again here even though the builder stage
-# already installed it into /tmp/rootfs: COPY --from=builder only copies
-# files, not rpmdb records, so this image's own rpm database doesn't know
-# about it yet (rpm -q would report "not installed"). What the copy above
-# actually buys us is the repo file + imported GPG key the builder stage set
-# up, which is what lets this microdnf install succeed without redoing
-# either -- and which properly registers the package in this stage's rpmdb.
+# haproxy-awslc isn't in any UBI repo, so add HAProxyTech's repo directly
+# against this image's own rpmdb -- no separate builder/installroot stage
+# needed. (A prior version of this Containerfile built haproxy-awslc into an
+# empty --installroot in a separate stage and COPY'd the whole result in;
+# that installroot has to bootstrap its own base OS from scratch to satisfy
+# haproxy-awslc's dependencies, which added ~270MB of duplicate base-system
+# files on top of this image's own base for no benefit -- haproxy-awslc's
+# only real *new* dependency beyond what's already here is awslc-libs.)
 RUN set -eux; \
+    rpm --import "${HAPROXY_GPG_KEY_URL}"; \
+    printf '[haproxy-ha33]\nname=HAProxy 3.3 AWS-LC for RHEL10\nbaseurl=%s\nenabled=1\ngpgcheck=1\n' "${HAPROXY_REPO_URL}" > /etc/yum.repos.d/haproxy.repo; \
     microdnf -y update; \
     microdnf -y install \
-        haproxy-awslc; \
+        haproxy-awslc \
+        libcap; \
     curl -fsSL  ${DATAPLANE_URL_BASE}/v${DATAPLANE_VERSION}/dataplaneapi_${DATAPLANE_VERSION}_linux_amd64.rpm -o /tmp/dataplaneapi_linux_amd64.rpm; \
     rpm -ivh /tmp/dataplaneapi_linux_amd64.rpm; \
     rm /tmp/dataplaneapi_linux_amd64.rpm; \
     rpm -q haproxy-awslc; \
     haproxy -v; \
+    # Grant the non-root haproxy process (USER 1001, see below) permission to
+    # bind privileged ports (80/443) via a file capability on the binary
+    # itself, rather than running as root. CAP_NET_BIND_SERVICE is already in
+    # Docker's/Podman's default container capability bounding set, so this
+    # alone is normally sufficient -- no --cap-add needed at `run` time.
+    setcap 'cap_net_bind_service=+ep' "$(command -v haproxy)"; \
     microdnf clean all; \
     rm -rf /var/cache/dnf /var/cache/yum /tmp/*; \
     mkdir -p "${HAPROXY_CFG_DIR}" "${HAPROXY_CONF_D_DIR}" "${HAPROXY_STATE_DIR}" "${HAPROXY_CERT_DIR}" "${HAPROXY_BACKUP_DIR}" "${HAPROXY_MAPS_DIR}" "${HAPROXY_SPOE_DIR}" "${HAPROXY_DATAPLANE_STORAGE_DIR}" "${HAPROXY_ACME_DIR}" /run/haproxy /tmp/haproxy /tmp/haproxy-transactions /tmp/spoe-haproxy; \
@@ -103,7 +87,7 @@ RUN set -eux; \
 
 # Install acme.sh (full tree, so the dns_porkbun DNS-01 plugin is available) and
 # generate a throwaway self-signed bootstrap cert so the HTTPS frontend can bind
-# on :8443 before the ACME agent issues the first real certificate.
+# on :443 before the ACME agent issues the first real certificate.
 ARG ACME_SH_REF=master
 RUN set -eux; \
     mkdir -p "${LE_WORKING_DIR}"; \
@@ -144,7 +128,7 @@ RUN set -eux; \
 RUN set -eux; \
     echo "haproxy:x:1001:0:HAProxy:/tmp:/sbin/nologin" >> /etc/passwd
 
-EXPOSE 8080 8443 8444 6443 22623 8404 5555
+EXPOSE 80 443 8444 6443 22623 8404 5555
 
 # /etc/haproxy/conf.d/ is a volume mount point. The demo frontend/backend
 # config baked in above (from ubi10/conf.d/) populates it by default -- Docker

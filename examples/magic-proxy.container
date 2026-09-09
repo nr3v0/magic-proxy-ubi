@@ -1,0 +1,51 @@
+# Quadlet unit (preferred over the deprecated `podman generate systemd`).
+#
+# Install (rootful):
+#   sudo cp examples/magic-proxy.container /etc/containers/systemd/
+#   sudo mkdir -p /etc/magic-proxy
+#   sudo cp examples/acme.env.example     /etc/magic-proxy/acme.env   # then edit secrets
+#   sudo cp examples/domains.txt.example  /etc/magic-proxy/domains.txt
+#   sudo chmod 600 /etc/magic-proxy/acme.env
+#   sudo systemctl daemon-reload
+#   sudo systemctl start magic-proxy.service
+#
+# Quadlet generates a systemd service named after the file: magic-proxy.service.
+
+[Unit]
+Description=HAProxy 3.3 (UBI10) + Data Plane API + ACME DNS-01 agent
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=ghcr.io/yourorg/magic-proxy-ubi:latest
+ContainerName=magic-proxy
+EnvironmentFile=/etc/magic-proxy/acme.env
+Volume=/etc/magic-proxy/domains.txt:/etc/haproxy/acme/domains.txt:ro,Z
+# Always persist these two -- ACME account/renewal state and the actual PEM
+# files HAProxy serves. See "Volume & Persistence Guidance" in README.md.
+Volume=magic-proxy.volume:/etc/haproxy/acme:Z
+Volume=haproxy-certs.volume:/etc/haproxy/certs:Z
+# Optional: only needed if you manage maps/backups/SPOE via the Data Plane
+# API and want that state to survive a restart too.
+Volume=haproxy-maps.volume:/etc/haproxy/maps:Z
+Volume=haproxy-backups.volume:/etc/haproxy/backups:Z
+Volume=haproxy-spoe.volume:/etc/haproxy/spoe:Z
+Volume=haproxy-dataplane-storage.volume:/etc/haproxy/dataplane-storage:Z
+# Ports 80/443 are privileged; the haproxy binary carries the
+# cap_net_bind_service file capability (set at image build time), which
+# normally suffices since that capability is already in Podman's default
+# set. AddCapability= below is a defensive, explicit statement of the
+# requirement for hardened/custom capability profiles.
+AddCapability=CAP_NET_BIND_SERVICE
+PublishPort=80:80
+PublishPort=443:443
+PublishPort=8404:8404
+PublishPort=5555:5555
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target default.target

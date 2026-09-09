@@ -85,8 +85,8 @@ Deploy. Container Station will show the container's health status once the built
 From another machine on the LAN:
 
 ```bash
-curl -I http://<nas-ip>:8080/                    # HTTP frontend (with the demo config, expect a 503 — its placeholder backend isn't running)
-curl -sk https://<nas-ip>:8443/ -o /dev/null -w '%{http_code}\n'
+curl -I http://<nas-ip>:80/                      # HTTP frontend (with the demo config, expect a 503 — its placeholder backend isn't running)
+curl -sk https://<nas-ip>:443/ -o /dev/null -w '%{http_code}\n'
 curl -I http://<nas-ip>:8404/stats               # HAProxy stats page
 curl -u admin:<your-DATAPLANE_PASS> http://<nas-ip>:5555/v3/services/haproxy/configuration/version
 ```
@@ -105,6 +105,6 @@ curl -u admin:<your-DATAPLANE_PASS> http://<nas-ip>:5555/v3/services/haproxy/con
   actually persisted (not accidentally left un-mounted) before testing against
   production Let's Encrypt — use `ACME_CA: letsencrypt_test` (staging) first, same as
   this repo's own `make test` does.
-* **Reusing this repo's Quadlet example instead** — `examples/haproxy-acme.container`
+* **Reusing this repo's Quadlet example instead** — `examples/magic-proxy.container`
   is the equivalent for a Linux host running Podman + systemd rather than QNAP
   Container Station; same volumes, different mechanism.

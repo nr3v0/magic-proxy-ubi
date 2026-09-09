@@ -18,8 +18,8 @@ services:
     # 8080/443 for the admin UI) -- check Control Panel -> System -> General
     # -> System Administration first and remap the left side if it conflicts.
     ports:
-      - "8080:8080"    # http
-      - "8443:8443"    # https, TLS-terminating
+      - "80:80"        # http
+      - "443:443"      # https, TLS-terminating
       - "8444:8444"    # https, SNI-passthrough (only used if your conf.d has it)
       - "6443:6443"    # OpenShift api-server passthrough (only used if your conf.d has it)
       - "22623:22623"  # OpenShift machine-config-server passthrough (same)
@@ -27,6 +27,14 @@ services:
       - "5555:5555"    # Data Plane API -- consider NOT publishing this externally;
                         # bind to 127.0.0.1 (e.g. "127.0.0.1:5555:5555") or drop it
                         # from `ports:` entirely if you don't need remote access.
+
+    # 80/443 are privileged ports; the haproxy binary carries the
+    # cap_net_bind_service file capability (set at image build time), which
+    # normally suffices since QNAP's dockerd includes that capability by
+    # default. Listed explicitly anyway in case your Container Station
+    # security profile has dropped it.
+    cap_add:
+      - NET_BIND_SERVICE
 
     environment:
       # Change before deploying -- this authenticates the Data Plane API.

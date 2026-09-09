@@ -21,3 +21,5 @@ ubi10/TESTFILE.txt
 *.bak
 claude-resume.txt
 .claude/
+
+magic-proxy-ubi.tgz
