@@ -6,9 +6,12 @@
 # certificates, then hands each cert to HAProxy through the Data Plane API
 # (see acme-deploy-dataplane.sh, wired in as acme.sh's --reloadcmd).
 #
-# One certificate PER domain (not one multi-SAN cert covering every domain
-# in the list) -- each is issued and renewed independently, so a DNS-01
-# problem with any single domain can't block issuance for the rest.
+# One certificate per domains-file line by default -- each is issued and
+# renewed independently, so a DNS-01 problem with one line can't block the
+# rest. A line with comma-separated domains (e.g. "a.example.com,
+# b.example.com") issues those as SANs on a single shared certificate
+# instead -- use that only where a service genuinely needs one cert to
+# cover several names; everything else stays isolated.
 #
 # Runs as a long‑lived background daemon launched by the container entrypoint
 # when ACME_ENABLED=true. It never exits on transient failure so the container
@@ -17,8 +20,10 @@
 # Configuration:
 #   * Domains:
 #       - ACME_DOMAINS           – space‑separated list (legacy)
-#       - ACME_DOMAINS_FILE      – path to a file with one domain per line
-#                                  (lines starting with # are ignored).
+#       - ACME_DOMAINS_FILE      – path to a file with one domain (or
+#                                  comma-separated domains for one shared
+#                                  multi-SAN cert) per line; lines starting
+#                                  with # are ignored.
 #       Defaults to /etc/haproxy/acme/acme_domains.txt, which ships with
 #       everything commented out (safe no-op). If the file exists but is
 #       empty/all-comments, ACME_DOMAINS is used instead; if the file has
@@ -53,19 +58,33 @@ DEPLOY_HOOK="/usr/local/bin/acme-deploy-dataplane.sh"
 log() { echo "[acme-agent] $*"; }
 
 # ----------------------------------------------------------------------
-# Helper: load domain list from either ACME_DOMAINS_FILE (one per line, #
-# comments ignored) or ACME_DOMAINS (space-separated). The file only wins
-# if it actually has content after stripping comments/blank lines -- this
-# matters because ACME_DOMAINS_FILE has a baked-in default (see Containerfile)
-# that ships empty, so a bare `-e ACME_DOMAINS=...` override still works
-# without also having to unset ACME_DOMAINS_FILE.
-# Returns a space-separated list suitable for rebuilding the -d arguments.
+# Helper: load domain list from either ACME_DOMAINS_FILE (one entry per
+# line, # comments ignored) or ACME_DOMAINS (space-separated). The file
+# only wins if it actually has content after stripping comments/blank
+# lines -- this matters because ACME_DOMAINS_FILE has a baked-in default
+# (see Containerfile) that ships empty, so a bare `-e ACME_DOMAINS=...`
+# override still works without also having to unset ACME_DOMAINS_FILE.
+#
+# A line may be a single domain, or several comma-separated domains
+# (whitespace around commas is trimmed) -- the latter become SANs on one
+# shared certificate instead of independent single-domain certs; see
+# issue_or_renew()'s group handling below.
+#
+# Returns a space-separated list of "groups" (each group is one domain, or
+# several joined by commas with no surrounding space) suitable for
+# rebuilding the -d arguments.
 # ----------------------------------------------------------------------
 load_domains() {
     local result=""
     if [ -n "$ACME_DOMAINS_FILE" ] && [ -r "$ACME_DOMAINS_FILE" ]; then
-        # Strip comments, trim whitespace, ignore empty lines, join with space.
-        result=$(grep -v '^#' "$ACME_DOMAINS_FILE" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | tr '\n' ' ')
+        # Strip comments, trim whitespace, collapse whitespace around commas
+        # (so a comma-group stays one whitespace-delimited token below),
+        # ignore empty lines, join with space.
+        result=$(grep -v '^#' "$ACME_DOMAINS_FILE" \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | sed 's/[[:space:]]*,[[:space:]]*/,/g' \
+            | grep -v '^$' \
+            | tr '\n' ' ')
     fi
     if [ -z "$result" ] && [ -n "$ACME_DOMAINS" ]; then
         result="$ACME_DOMAINS"
@@ -113,11 +132,14 @@ if [ -z "${PORKBUN_API_KEY:-}" ] || [ -z "${PORKBUN_SECRET_API_KEY:-}" ]; then
 fi
 export PORKBUN_API_KEY PORKBUN_SECRET_API_KEY
 
-# One certificate PER domain, not one multi-SAN cert covering all of them --
-# each domain is issued/tracked independently by acme.sh (keyed by its own
-# $LE_CONFIG_HOME/<domain> directory) so a DNS-01 failure on any single
-# domain (rate limit, a stale/missing DNS record, etc.) can't block
-# issuance for every other domain in the list.
+# One certificate per domains-file *line* (usually one domain, so one
+# certificate per domain) -- each is issued/tracked independently by
+# acme.sh (keyed by its own $LE_CONFIG_HOME/<main-domain> directory) so a
+# DNS-01 failure on one line (rate limit, a stale/missing DNS record, etc.)
+# can't block issuance for every other line. A comma-separated line issues
+# its domains together as SANs on one certificate, identified by the first
+# domain in that group -- opt into that only for domains that genuinely
+# need to share a cert; the default (one domain per line) stays isolated.
 cert_exists_for() {
     d="$1"
     [ -d "$LE_CONFIG_HOME/$d" ] || [ -d "${LE_CONFIG_HOME}/${d}_ecc" ]
@@ -130,17 +152,28 @@ if [ -n "$ACME_EMAIL" ]; then
 fi
 
 issue_or_renew() {
-    for d in $domains_list; do
-        if cert_exists_for "$d"; then
+    for group in $domains_list; do
+        # group is one domain, or several comma-separated domains sharing
+        # one certificate -- the first is the identity acme.sh tracks it
+        # under, matching what --issue itself uses when given multiple -d.
+        main_domain="${group%%,*}"
+        if cert_exists_for "$main_domain"; then
             continue
         fi
-        log "issuing certificate for: $d"
-        "$ACME_SH" --issue --server "$ACME_CA" --dns dns_porkbun -d "$d" \
+        log "issuing certificate for: $group"
+        set --
+        old_ifs="$IFS"
+        IFS=','
+        for d in $group; do
+            set -- "$@" -d "$d"
+        done
+        IFS="$old_ifs"
+        "$ACME_SH" --issue --server "$ACME_CA" --dns dns_porkbun "$@" \
             --reloadcmd "$DEPLOY_HOOK" ${ACME_EXTRA_ARGS:-} || \
-            log "issue failed for $d; will retry next cycle"
+            log "issue failed for $group; will retry next cycle"
     done
-    # --cron renews (across all domains issued above, in past cycles, or
-    # already present before this container started) only the certs that
+    # --cron renews (across all certs issued above, in past cycles, or
+    # already present before this container started) only the ones that
     # are due, and reruns each one's own stored reloadcmd.
     "$ACME_SH" --cron || log "renewal cycle returned non-zero (will retry)"
 }

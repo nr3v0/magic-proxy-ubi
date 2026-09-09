@@ -2,6 +2,12 @@
 # One per line; blank lines and lines starting with # are ignored.
 # Wildcards are supported (DNS-01 makes them possible).
 #
+# A line can list several comma-separated domains to issue them together
+# as SANs on one shared certificate, e.g. "a.example.com, b.example.com"
+# -- use that only for domains that genuinely need to share a cert; a
+# plain one-domain-per-line entry (the default) gets its own independent
+# certificate, so a DNS-01 problem with one domain can't block the others.
+#
 # This is the image's baked-in default (ACME_DOMAINS_FILE points here) --
 # it ships with everything commented out, so ACME_ENABLED=true is a safe
 # no-op ("No domains configured. Idling.") until you either edit this in,
@@ -11,3 +17,4 @@
 #
 # example.com
 # *.example.com
+# a.example.com, b.example.com
