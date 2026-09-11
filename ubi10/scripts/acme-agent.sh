@@ -142,7 +142,16 @@ export PORKBUN_API_KEY PORKBUN_SECRET_API_KEY
 # need to share a cert; the default (one domain per line) stays isolated.
 cert_exists_for() {
     d="$1"
-    [ -d "$LE_CONFIG_HOME/$d" ] || [ -d "${LE_CONFIG_HOME}/${d}_ecc" ]
+    # Check for the actual signed cert file, not just the directory -- an
+    # interrupted/failed --issue run (killed mid-order, a DNS-01 failure
+    # after the key/CSR were already generated, etc.) leaves a directory
+    # behind with a .key/.csr but no .cer, which acme.sh's own --cron
+    # treats as "invalid" and silently skips forever. Checking directory
+    # existence alone meant that same stale directory made us skip issuing
+    # it fresh too, so the domain never got a real cert until someone
+    # manually rm -rf'd the directory. -s (non-empty) also catches a
+    # zero-byte truncated file.
+    [ -s "$LE_CONFIG_HOME/$d/$d.cer" ] || [ -s "${LE_CONFIG_HOME}/${d}_ecc/${d}.cer" ]
 }
 
 # Register an ACME account up front (idempotent; some CAs require an email).
